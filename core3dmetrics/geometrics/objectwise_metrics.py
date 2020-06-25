@@ -141,6 +141,7 @@ def run_objectwise_metrics(refDSM, refDTM, refMask, testDSM, testDTM, testMask, 
             self.MIN_AREA_FILTER = 0
             self.UNCERTAIN_VALUE = 65
     params = instance_parameters()
+    # multiprocess eval_instance_metrics?
     metrics_container_no_merge = eval_instance_metrics(ref_ndx, params, test_ndx)
     no_merge_f1 = metrics_container_no_merge.f1_score
     num_buildings_performer = np.unique(test_ndx).__len__()-1
@@ -388,6 +389,7 @@ def run_objectwise_metrics(refDSM, refDTM, refMask, testDSM, testDTM, testMask, 
         'summary': summary,
         'objects': metric_list,
         'instance_f1': no_merge_f1,
+        # TODO: why are these none?????
         'instance_f1_merge_fp': None,
         'instance_f1_merge_fn': None,
         'num_buildings_gt': num_buildings_truth,

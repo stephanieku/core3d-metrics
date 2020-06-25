@@ -4,6 +4,7 @@ import time as time
 from core3dmetrics.instancemetrics.Building_Classes import Building, create_raster_from_building_objects
 from core3dmetrics.instancemetrics.MetricsCalculator import MetricsCalculator as MetricsCalc
 from core3dmetrics.instancemetrics.MetricsContainer import MetricsContainer
+import multiprocessing
 
 
 def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=100, fill='#'):
@@ -132,6 +133,37 @@ def calculate_metrics_iterator(gt_buildings, gt_indx_raster, ignored_gt, perf_in
     return metrics_container
 
 
+def calculate_current_index_metrics(MIN_AREA_FILTER, index, indx_raster, edge_x, edge_y, filter_area:bool=False):
+    current_building = Building(index)
+    # Get x,y points of building pixels
+    x_points, y_points = np.where(indx_raster == index)
+    if len(x_points) == 0 or len(y_points) == 0:
+        return
+    # Get minimum and maximum points
+    current_building.min_x = x_points.min()
+    current_building.min_y = y_points.min()
+    current_building.max_x = x_points.max()
+    current_building.max_y = y_points.max()
+    current_building.points = np.array(list(zip(x_points, y_points)))
+    building_raster = MetricsCalc.create_individual_building_raster(current_building)
+    # Calculate Perimeter
+    current_building.perimeter = MetricsCalc.calculate_perimeter(building_raster)
+    # Calculate Area
+    current_building.area = MetricsCalc.calculate_area(current_building)
+    # Create dictionary entry based on building index
+    # Check if building is on the edge of AOI
+    if current_building.min_x == 0 or current_building.min_y == 0 or current_building.max_x == edge_x \
+            or current_building.max_y == edge_y:
+        current_building.on_boundary = True
+    # TODO: Filter by area, not only minimum size
+    ignored_index = None
+    if filter_area and current_building.area < MIN_AREA_FILTER:
+        current_building.is_ignored = True
+        ignored_index = current_building.label
+
+    return ignored_index, index, current_building
+
+
 def eval_instance_metrics(gt_indx_raster, params, perf_indx_raster):
     start_time = time.time()
     edge_x, edge_y = np.shape(gt_indx_raster)
@@ -142,78 +174,36 @@ def eval_instance_metrics(gt_indx_raster, params, perf_indx_raster):
 
     # GCreate ground truth building objects
     print("Creating ground truth building objects...")
-    gt_buildings = {}
-    ignored_gt = []
-    iterations = 0
     total_iterations = len(unique_gt_ids)
     print_progress_bar(0, total_iterations, prefix='Progress:', suffix='Complete', length=50)
-    for current_index in unique_gt_ids:
-        iterations = iterations + 1
-        print_progress_bar(iterations, total_iterations, prefix='Progress:', suffix='Complete', length=50)
-        # print(str(iterations) + " out of " + str(total_iterations))
-        if current_index == 0:
-            continue
-        current_building = Building(current_index)
-        # Get x,y points of building pixels
-        x_points, y_points = np.where(gt_indx_raster == current_index)
-        if len(x_points) == 0 or len(y_points) == 0:
-            continue
-        # Get minimum and maximum points
-        current_building.min_x = x_points.min()
-        current_building.min_y = y_points.min()
-        current_building.max_x = x_points.max()
-        current_building.max_y = y_points.max()
-        current_building.points = np.array(list(zip(x_points, y_points)))
-        building_raster = MetricsCalc.create_individual_building_raster(current_building)
-        # Calculate Perimeter
-        current_building.perimeter = MetricsCalc.calculate_perimeter(building_raster)
-        # Calculate Area
-        current_building.area = MetricsCalc.calculate_area(current_building)
-        # Create dictionary entry based on building index
-        gt_buildings[current_index] = current_building
-        # Check if building is on the edge of AOI
-        if current_building.min_x == 0 or current_building.min_y == 0 or current_building.max_x == edge_x \
-                or current_building.max_y == edge_y:
-            current_building.on_boundary = True
-        # TODO: Filter by area, not only minimum size
-        if current_building.area < params.MIN_AREA_FILTER:
-            current_building.is_ignored = True
-            ignored_gt.append(current_building.label)
+
+    arguments = []
+    for index in range(1, total_iterations+1):
+        arguments.append([params.MIN_AREA_FILTER, index, gt_indx_raster, edge_x, edge_y, True])
+
+    use_multiprocessing = True
+    if use_multiprocessing:
+        with multiprocessing.Pool() as pool:
+            return_values = list(pool.starmap(calculate_current_index_metrics, arguments))
+    # ignored_gt, index, current_building
+    ignored_gt = [_[0] for _ in return_values if _ is not None and _[0] is not None]
+    gt_buildings = dict([(_[1], _[2]) for _ in return_values if _ is not None])
     ignored_gt = list(np.unique(ignored_gt))
+
     # Create performer building objects
-    print("Creating performer building objects...")
-    performer_buildings = {}
-    iterations = 0
     total_iterations = len(unique_performer_ids)
+    print("Creating performer building objects...")
     print_progress_bar(0, total_iterations, prefix='Progress:', suffix='Complete', length=50)
-    for current_index in unique_performer_ids:
-        iterations = iterations + 1
-        print_progress_bar(iterations, total_iterations, prefix='Progress:', suffix='Complete', length=50)
-        # print(str(iterations) + " out of " + str(total_iterations))
-        if current_index == 0:
-            continue
-        current_building = Building(current_index)
-        # Get x,y points of building pixels
-        x_points, y_points = np.where(perf_indx_raster == current_index)
-        if len(x_points) == 0 or len(y_points) == 0:
-            continue
-        # Get minimum and maximum points
-        current_building.min_x = x_points.min()
-        current_building.min_y = y_points.min()
-        current_building.max_x = x_points.max()
-        current_building.max_y = y_points.max()
-        current_building.points = np.array(list(zip(x_points, y_points)))
-        building_raster = MetricsCalc.create_individual_building_raster(current_building)
-        # Calculate Perimeter
-        current_building.perimeter = MetricsCalc.calculate_perimeter(building_raster)
-        # Calculate Area
-        current_building.area = MetricsCalc.calculate_area(current_building)
-        # Create dictionary entry based on building index
-        performer_buildings[current_index] = current_building
-        # Check if building is on the edge of AOI
-        if current_building.min_x == 0 or current_building.min_y == 0 or current_building.max_x == edge_x \
-                or current_building.max_y == edge_y:
-            current_building.on_boundary = True
+    arguments = []
+    for index in range(1, total_iterations + 1):
+        arguments.append([params.MIN_AREA_FILTER, index, perf_indx_raster, edge_x, edge_y, False])
+
+    use_multiprocessing = True
+    if use_multiprocessing:
+        with multiprocessing.Pool() as pool:
+            return_values = list(pool.starmap(calculate_current_index_metrics, arguments))
+    performer_buildings = dict([(_[1], _[2]) for _ in return_values if _ is not None])
+
     # Create a metrics container
     metrics_container_no_merge = MetricsContainer()
     metrics_container_no_merge.name = "No Merge"
